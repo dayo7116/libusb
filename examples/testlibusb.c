@@ -21,7 +21,7 @@
 #include <string.h>
 #include "libusb.h"
 
-int verbose = 0;
+int verbose = 1;
 
 static void print_endpoint_comp(const struct libusb_ss_endpoint_companion_descriptor *ep_comp)
 {
@@ -186,6 +186,11 @@ static void print_device(libusb_device *dev, libusb_device_handle *handle)
 	printf("Dev (bus %u, device %u): %04X - %04X speed: %s\n",
 	       libusb_get_bus_number(dev), libusb_get_device_address(dev),
 	       desc.idVendor, desc.idProduct, speed);
+        if (desc.idVendor == 0x2D40 && desc.idProduct == 0x00B0) {
+          printf("Dev (bus %u, device %u): %04X - %04X speed: %s\n",
+                 libusb_get_bus_number(dev), libusb_get_device_address(dev),
+                 desc.idVendor, desc.idProduct, speed);
+        }
 
 	if (!handle)
 		libusb_open(dev, &handle);

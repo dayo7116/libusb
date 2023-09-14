@@ -36,7 +36,7 @@
 #include "libusb.h"
 
 #define EP_DATA_IN	0x82
-#define EP_ISO_IN	0x86
+#define EP_ISO_IN	0
 
 static volatile sig_atomic_t do_exit = 0;
 static struct libusb_device_handle *devh = NULL;
@@ -93,28 +93,17 @@ static void LIBUSB_CALL cb_xfr(struct libusb_transfer *xfr)
 		}
 	}
 
-	printf("length:%u, actual_length:%u\n", xfr->length, xfr->actual_length);
-	for (i = 0; i < xfr->actual_length; i++) {
-		printf("%02x", xfr->buffer[i]);
-		if (i % 16)
-			printf("\n");
-		else if (i % 8)
-			printf("  ");
-		else
-			printf(" ");
-	}
+	printf("length:%u, actual_length:%u, %s, total:%d\n", xfr->length,
+               xfr->actual_length, xfr->buffer, num_bytes);
 	num_bytes += xfr->actual_length;
 	num_xfer++;
-
-	if (libusb_submit_transfer(xfr) < 0) {
-		fprintf(stderr, "error re-submitting URB\n");
-		exit(1);
-	}
+        //libusb_free_transfer(xfr);
+        libusb_submit_transfer(xfr);
 }
 
 static int benchmark_in(uint8_t ep)
 {
-	static uint8_t buf[2048];
+  static uint8_t buf[64] = "hello world";
 	static struct libusb_transfer *xfr;
 	int num_iso_pack = 0;
 
@@ -150,8 +139,11 @@ static int benchmark_in(uint8_t ep)
 	 * more transfers on the bus while the callback is running for
 	 * transfers which have completed on the bus.
 	 */
-
-	return libusb_submit_transfer(xfr);
+  int submit = libusb_submit_transfer(xfr);
+        if (0 != submit) {
+    printf("");
+				}
+  return submit;
 }
 
 static void measure(void)
@@ -175,6 +167,24 @@ static void sig_hdlr(int signum)
 	measure();
 	do_exit = 1;
 }
+void test_write_read() {
+  unsigned char buffer_send[64]; 
+	memset(buffer_send, 0, 64);
+	strcpy((char*)buffer_send, "hello world");
+	int bytes_sent = 0;
+        
+	int send_ret = libusb_interrupt_transfer(devh, 0x01, buffer_send, 64,
+                                                 &bytes_sent, 0);
+	printf("send ret:%d, count:%d \n", send_ret, bytes_sent);
+
+	
+	int bytes_read = 0;
+	unsigned char buffer_read[64];
+	memset(buffer_read, 0, 64);
+	int result = libusb_interrupt_transfer(
+            devh, 0x81, buffer_read, 64, &bytes_read, 0);
+	printf("Read result: %i, Bytes read: %u, %s\n", result, bytes_read, buffer_read);
+}
 
 int main(void)
 {
@@ -197,29 +207,38 @@ int main(void)
 		exit(1);
 	}
 
-	devh = libusb_open_device_with_vid_pid(NULL, 0x16c0, 0x0763);
+	devh = libusb_open_device_with_vid_pid(NULL, 0x05c6, 0x900E);
 	if (!devh) {
 		fprintf(stderr, "Error finding USB device\n");
 		goto out;
 	}
 
-	rc = libusb_claim_interface(devh, 2);
+	rc = libusb_claim_interface(devh, 0);
 	if (rc < 0) {
 		fprintf(stderr, "Error claiming interface: %s\n", libusb_error_name(rc));
 		goto out;
 	}
 
-	benchmark_in(EP_ISO_IN);
+	//benchmark_in(0x01);
+        test_write_read();
 
 	while (!do_exit) {
 		rc = libusb_handle_events(NULL);
+                
+		//unsigned char data[256] = {0};
+  //        int read_length = 0;
+  //        int ret =
+  //            libusb_bulk_transfer(devh, 0x01, data, 256, &read_length, 0);
+  //        if (0 == ret) {
+  //          printf("read ret %d, length %d, %s\n", ret, read_length, data);
+  //        }
 		if (rc != LIBUSB_SUCCESS)
 			break;
 	}
 
 	/* Measurement has already been done by the signal handler. */
 
-	libusb_release_interface(devh, 2);
+	libusb_release_interface(devh, 0);
 out:
 	if (devh)
 		libusb_close(devh);

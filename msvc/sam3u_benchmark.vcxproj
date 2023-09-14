@@ -14,12 +14,19 @@
     <Import Project="Base.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\examples\sam3u_benchmark.c" />
+    <ClCompile Include="MTXR_UsbConnection.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include=".\config.h" />
     <ClInclude Include="..\libusb\libusb.h" />
+    <ClInclude Include="MTXR_UsbConnection.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include=".\libusb_static.vcxproj">
