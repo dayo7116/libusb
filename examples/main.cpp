@@ -39,6 +39,7 @@
 
 #include <string>
 #include <chrono>
+#include <vector>
 
 #define EP_DATA_IN 0x82
 #define EP_ISO_IN 0
@@ -133,19 +134,23 @@ static void LIBUSB_CALL cb_xfr_in(struct libusb_transfer *xfr) {
   libusb_free_transfer(xfr);
 }
 
+const int buf_length = 1024 * 10;
+
 static int benchmark_out(uint8_t ep) {
   static int s_count = 0;
+  s_count++;
+  std::string msg = "hello world from pc " + std::to_string(s_count);
 
-  struct libusb_transfer *xfr = libusb_alloc_transfer(0);
+  int rand_num = std::rand();
+  int buf_length = 1024 * (rand_num % 10) + rand_num % 1000;
+  int required_sz = msg.length() + 11;
+  buf_length = max(buf_length, required_sz);
+  /*struct libusb_transfer *xfr = libusb_alloc_transfer(0);
   if (!xfr) {
     errno = ENOMEM;
     return -1;
   }
 
-  s_count++;
-  std::string msg = "hello world from pc " + std::to_string(s_count);
-
-  const int buf_length = 128;
   uint8_t *buf = new uint8_t[buf_length];
   memset(buf, 0, buf_length * sizeof(uint8_t));
   strcpy((char *)buf, msg.c_str());
@@ -157,20 +162,37 @@ static int benchmark_out(uint8_t ep) {
   if (0 != submit) {
     printf("");
   }
-  return submit;
+  return submit;*/
+  std::vector<uint8_t> package(buf_length);
+
+  uint8_t* buf = package.data();
+  memset(buf, 0, buf_length * sizeof(uint8_t));
+  buf[0] = 'M';
+  buf[1] = 'T';
+  buf[2] = 'X';
+  buf[3] = 'R';
+  buf[4] = 1;
+  buf[5] = 1;
+  *((uint32_t *)(buf + 6)) = buf_length - 10;
+  strcpy((char *)(buf + 10), msg.c_str());
+
+  int write_length = 0;
+  int write_ret =
+      libusb_bulk_transfer(devh, ep, buf, buf_length, &write_length, 0);
+  printf("send loop:%d ret:%d, length:%u, %s \n", s_count, write_ret,
+         write_length, buf);
+  return write_ret;
 }
 
 static int benchmark_in(uint8_t ep) {
-  struct libusb_transfer *xfr = libusb_alloc_transfer(0);
+  /*uint8_t *buf = new uint8_t[buf_length];
+  memset(buf, 0, buf_length * sizeof(uint8_t));
 
+  struct libusb_transfer *xfr = libusb_alloc_transfer(0);
   if (!xfr) {
     errno = ENOMEM;
     return -1;
   }
-
-  const int buf_length = 128;
-  uint8_t *buf = new uint8_t[buf_length];
-  memset(buf, 0, buf_length * sizeof(uint8_t));
 
   xfr->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
   libusb_fill_bulk_transfer(xfr, devh, ep, buf, buf_length, cb_xfr_in, NULL,
@@ -179,7 +201,16 @@ static int benchmark_in(uint8_t ep) {
   if (0 != submit) {
     printf("");
   }
-  return submit;
+  return submit;*/
+
+  std::vector<uint8_t> package(buf_length);
+  uint8_t *buf = package.data();
+  memset(buf, 0, buf_length * sizeof(uint8_t));
+  int read_length = 0;
+  int read_ret = libusb_bulk_transfer(devh, ep, buf, buf_length, &read_length, 0);
+  buf += 10;
+  printf("receive ret:%d length:%u, %s\n", read_ret, read_length, buf);
+  return read_ret;
 }
 
 static void measure(void) {
@@ -242,6 +273,122 @@ void printDev() {
   }
 }
 
+#pragma pack(1)  // 确保按字节对齐
+struct USBPackageHead {
+  unsigned char flags[4];
+  unsigned char media_type;
+  unsigned char data_type;
+  uint32_t package_length;
+};
+#pragma pack()  // 恢复默认对齐方式
+
+enum class MediaType {
+  None = 0,
+  Video = 1,
+  Audio = 2,
+  HandShake = 3,
+  MediaCount = 4,
+};
+
+//与SoupWebsocketDataType一致
+enum class DataType {
+  Text = 1,
+  Binary = 2,
+  String = 3,
+};
+
+#define ClientHandShakeMsg "Client"
+#define ServerHandShakeMsg "Server"
+
+USBPackageHead ParsePackageHead(unsigned char *buffer, int bytes_read) {
+  USBPackageHead header;
+  header.package_length = 0;
+
+  const int header_sz = sizeof(USBPackageHead);
+  if (bytes_read < header_sz) {
+    return header;
+  }
+
+  unsigned char *p_cur_pos = buffer;
+  if (p_cur_pos[0] != 'M' || p_cur_pos[1] != 'T' || p_cur_pos[2] != 'X' ||
+      p_cur_pos[3] != 'R') {
+    return header;
+  }
+  p_cur_pos += 4;
+  header.media_type = p_cur_pos[0];
+  p_cur_pos++;
+  header.data_type = p_cur_pos[0];
+  p_cur_pos++;
+
+  header.package_length = *((uint32_t *)p_cur_pos);
+  return header;
+}
+
+const int hand_shake_buffer_length = 256;
+bool ReadHandShake(uint8_t ep, int loop) {
+  std::vector<uint8_t> package(hand_shake_buffer_length);
+  uint8_t *buf = package.data();
+  memset(buf, 0, hand_shake_buffer_length * sizeof(uint8_t));
+
+  int read_length = 0;
+  int read_ret =
+      libusb_bulk_transfer(devh, ep, buf, buf_length, &read_length, 0);
+  if (read_ret != LIBUSB_SUCCESS) {
+    return false;
+  }
+
+  USBPackageHead header = ParsePackageHead(buf, read_length);
+  int client_msg_length = strlen(ClientHandShakeMsg);
+  if (header.package_length < client_msg_length) {
+    return false;
+  }
+  const int header_sz = sizeof(USBPackageHead);
+  unsigned char *p_cur_pos = buf + header_sz;
+  
+  std::string server_msg((const char *)p_cur_pos, header.package_length);
+  printf("read handshake %s at %d \n", server_msg.c_str(), loop);
+  if (server_msg.find(ClientHandShakeMsg) != std::string::npos) {
+    return true;
+  }
+  return false;
+}
+
+bool WriteHandShake(uint8_t ep, int loop) {
+  std::string text = ServerHandShakeMsg + std::to_string(loop);
+  int text_size = text.length();
+  int buffer_size = text_size + sizeof(USBPackageHead);
+
+  int rand_num = std::rand() % 100;
+  buffer_size += rand_num;
+
+  std::vector<unsigned char> buffer(buffer_size);
+  unsigned char *p_pos = buffer.data();
+  memset(p_pos, 0, buffer_size * sizeof(unsigned char));
+  p_pos[0] = 'M';
+  p_pos[1] = 'T';
+  p_pos[2] = 'X';
+  p_pos[3] = 'R';
+  p_pos[4] = static_cast<unsigned char>(MediaType::HandShake);
+  p_pos[5] = 1;
+  p_pos += 6;
+  *((uint32_t *)p_pos) = buffer_size - sizeof(USBPackageHead);
+  p_pos += sizeof(uint32_t);
+  memcpy(p_pos, text.data(), text_size);
+  
+  int write_length = 0;
+  int write_ret = libusb_bulk_transfer(devh, ep, buffer.data(), buffer_size,
+                                       &write_length, 0);
+  printf("write handshake ret:%d, count:%d, %s \n", write_ret, write_length, text.c_str());
+  return write_ret;
+}
+
+
+#define EP_IN 0x83
+#define EP_OUT 0x02
+
+#define HAND_SHAKE_INTERVAL_MS 500
+bool b_hand_shake_done = false;
+
 int run(void) {
   // std::thread *usb_thread = new std::thread();
 
@@ -275,13 +422,24 @@ int run(void) {
     fprintf(stderr, "Error claiming interface: %s\n", libusb_error_name(rc));
   }
 
-  const int frame_duration = 2;
+  const int frame_duration = 10;
   
   std::shared_ptr<std::thread> write_thread =
       std::make_shared<std::thread>([frame_duration]() {
     auto last_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        int count = 0;
+    std::srand(
+        std::time(nullptr));  // use current time as seed for random generator
+
+    int loop = 0;
+    while (!b_hand_shake_done) {
+      //if (loop < 10) 
+      { WriteHandShake(EP_OUT, loop++);
+      }
+    }
+
     while (true) {
-      benchmark_out(0x02);
+      benchmark_out(EP_OUT);
       auto current_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch())
         .count();
@@ -298,8 +456,17 @@ int run(void) {
         auto last_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::system_clock::now().time_since_epoch())
                            .count();
+
+        int loop = 0;
+        while (!ReadHandShake(EP_IN, ++loop)) {
+          printf("XR-USB read handshake fail, loop:%d \n", loop);
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(HAND_SHAKE_INTERVAL_MS));
+        }
+        b_hand_shake_done = true;
+
         while (true) {
-          benchmark_in(0x83);
+          benchmark_in(EP_IN);
           auto current_ms =
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::system_clock::now().time_since_epoch())

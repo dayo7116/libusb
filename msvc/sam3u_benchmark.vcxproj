@@ -23,13 +23,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\examples\main.cpp" />
+    <ClCompile Include="..\examples\MTXR_DataClient.cpp" />
+    <ClCompile Include="..\examples\MTXR_UsbClient.cpp" />
     <ClCompile Include="..\examples\sam3u_benchmark.c" />
-    <ClCompile Include="MTXR_UsbConnection.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\examples\MTXR_DataClient.h" />
+    <ClInclude Include="..\examples\MTXR_UsbClient.h" />
     <ClInclude Include=".\config.h" />
     <ClInclude Include="..\libusb\libusb.h" />
-    <ClInclude Include="MTXR_UsbConnection.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include=".\libusb_static.vcxproj">

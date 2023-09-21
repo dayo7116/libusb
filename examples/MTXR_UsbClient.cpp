@@ -1,4 +1,4 @@
-#include "MTXR_UsbConnection.h"
+#include "MTXR_UsbClient.h"
 #include "libusb.h"
 #include <memory>
 #include <mutex>
